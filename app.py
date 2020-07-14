@@ -32,7 +32,7 @@ import os
 from PIL import ImageTk,Image
 
 sender_email = os.getenv('EMAIL')
-receiver_email = "rodvaudio@gmail.com"
+receiver_email = os.getenv('RECIEVER_EMAIL')
 smtp_server = "smtp.gmail.com"
 alarm_active = False
 
