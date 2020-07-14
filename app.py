@@ -1,7 +1,7 @@
 # TODO:
 # Fix Thread killing bug
 # Work on the UI (it's horrible)
-# Add temperature sensor
+# Replace magnet sensor
 
 
 # ------------------------------------------------------------------------------
@@ -36,7 +36,7 @@ receiver_email = "rodvaudio@gmail.com"
 smtp_server = "smtp.gmail.com"
 alarm_active = False
 
-def arduinoConnect(src='/dev/ttyACM0'):
+def arduinoConnect(src='/dev/ttyACM1'):
     """
     Connects to Arduino Board in specified port.
 
@@ -57,6 +57,7 @@ def arduinoConnect(src='/dev/ttyACM0'):
         print('Connected to: ',board)
         board.analog[0].enable_reporting()
         board.analog[1].enable_reporting()
+        board.analog[2].enable_reporting()
 
 
         time.sleep(0.100)
@@ -83,9 +84,10 @@ def doorRead():
     (String): Sensor analog read.
     """
     piezo = int(door_sensor.read()*1000)
-    if piezo < 10:
+    print(piezo)
+    if piezo < 2:
         return 'Low'
-    elif 10 < piezo and piezo < 20:
+    elif 2 < piezo and piezo < 4:
         return 'Medium'
     else:
         return 'High'
@@ -96,7 +98,8 @@ def deactivateAlarm():
     """
     alarm_state.config(text='Alarm: Off')
     alarm_button.config(image=alarm_icon_off,command=setAlarm,text='')
-    alarm_active = False
+    global alarm_active
+    alarm = False
     #reading_thread.join()
 
 def setAlarm(doorThreshold=20):
@@ -110,9 +113,10 @@ def setAlarm(doorThreshold=20):
 
     alarm_state.config(text='Alarm: On')
     alarm_button.config(image = alarm_icon_on,command=deactivateAlarm)
+    global alarm_active
     alarm_active = True
     door_label.after(150,print(doorRead()))
-    reading_thread.start()
+
 
 def sendEmailAlert(sensor_message):
     """
@@ -127,8 +131,8 @@ def sendEmailAlert(sensor_message):
     message = """\
     Subject: Home Alert Notification
 
-    Your alert detected something: """ + sensor_message
-    context = ssl.create_default_context()
+    Your alert detected something: \n""" + sensor_message
+    #context = ssl.create_default_context()
 
     yag = yagmail.SMTP(email,password)
     yag.send(
@@ -148,27 +152,46 @@ def liveRead():
     while True:
         piezo = doorRead()
         magnet = windowTest()
+        temp = tempRead()
         time_log = datetime.now()
         window_label.config(text=magnet)
         door_label.config( text= piezo)
-        if piezo == 'High' or magnet == 'Open' and alarm_active == True:
+        temp_label.config(text=str(temp)+'°C')
+        danger_readings = piezo == 'High' or temp >= 40
+        if danger_readings and alarm_active:
             dict = {
                 'Door': piezo,
                 'Window': magnet,
+                'Temperature': temp,
                 'Time': str(time_log)
             }
             print(dict)
 
-            #try:
-            #    sendEmailAlert(json.dumps(dict))
-            #except:
-            #    print('ERROR: Error ocurred while sending mail',sys.exc_info()[0])
+
             sendEmailAlert(json.dumps(dict))
+            print('Email sent with alarm details')
+
+            #print('ERROR: Error ocurred while sending mail',sys.exc_info()[0])
+
             deactivateAlarm()
 
             return dict
+        # Delete comment for debug
+        #print('Door:', piezo,'|\t','Window:', magnet,'|\t','Temperature:', temp)
         time.sleep(0.150)
 
+def tempRead():
+    """
+    Reads door sensors from Arduino board connected to app.
+
+    Returns:
+    (int): Temperature in Celsius.
+    """
+    temp = temp_sensor.read() * 1000 / 1024
+    temp = temp * 5 #5 Volts
+    temp = (temp - 0.5) * 100
+
+    return int(temp)
 
 def windowTest():
     """
@@ -177,6 +200,8 @@ def windowTest():
     Returns:
     (String): Window state.
     """
+    #currently down
+    return 'Unavailable'
     result = window_sensor.read()
     if result > 0.0 :
         return 'Closed'
@@ -195,21 +220,26 @@ if __name__ == '__main__':
     board = arduinoConnect()
     door_sensor = board.get_pin('a:0:i')
     window_sensor = board.get_pin('a:1:i')
+    temp_sensor = board.get_pin('a:2:i')
     print('door_sensor:', door_sensor)
     print('window_sensor',window_sensor)
+    print('temp_sensor',temp_sensor)
     #-------------------------------------------------
 
     #This thread will run in the background.
-    reading_thread = threading.Thread(target=liveRead)
 
     Label(root,text='Door: ',font =('Verdana', 13)).pack(side=TOP)
     door_label = Label(root, text = door_sensor.read()*1000,
         font =('Verdana', 13))
     door_label.pack(side=TOP)
     Label(root,text='Window: ',font =('Verdana', 13)).pack(side=TOP)
-    window_label = Label(root, text = windowTest(),
+    window_label = Label(root, text = '0',
         font =('Verdana', 13))
     window_label.pack(side=TOP)
+    Label(root,text='Temp: ',font =('Verdana', 13)).pack(side=TOP)
+    temp_label = Label(root, text = '0',
+        font =('Verdana', 13))
+    temp_label.pack(side=TOP)
 
     alarm_state = Label(root, text = 'Alarm: Off',
         font =('Verdana', 15))
@@ -228,5 +258,7 @@ if __name__ == '__main__':
     windowButton.pack()
     doorButton = tk.Button(root,text="Window",command=print(windowTest))
     doorButton.pack()
+    reading_thread = threading.Thread(target=liveRead)
+    reading_thread.start()
 
     root.mainloop()
